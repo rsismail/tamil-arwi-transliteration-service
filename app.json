@@ -1,0 +1,24 @@
+{
+  "name": "Tamil-Arwi Transliteration Service",
+  "description": "A Flask API service for transliterating Tamil text to Arwi script using Google Gemini AI",
+  "image": "heroku/python",
+  "repository": "https://github.com/yourusername/tamil-arwi-translitrator",
+  "keywords": ["python", "flask", "ai", "nlp", "transliteration", "tamil", "arwi"],
+  "env": {
+    "GEMINI_API_KEY": {
+      "description": "Google Gemini API key for AI transliteration",
+      "required": true
+    }
+  },
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "free"
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ]
+}
