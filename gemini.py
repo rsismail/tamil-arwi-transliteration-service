@@ -12,16 +12,26 @@ from data_loader import load_data  # Import the load_data function
 from logger import log_data  # Import the log_data function
 from flask_cors import CORS
 import tempfile
-import json
 
+# Flask app
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-# Get API key from environment variable (more secure)
+# Load Gemini API key from environment
 API_KEY = os.environ.get('GEMINI_API_KEY')
+print(f"✅ API Key loaded: {'Yes' if API_KEY else 'No'}")
+
+# Temp file paths
 LOG_FILE = os.path.join(tempfile.gettempdir(), "output.log")
 OUTPUT_FILE = os.path.join(tempfile.gettempdir(), "temp_output.txt")
 TEMP_INPUT_FILE = os.path.join(tempfile.gettempdir(), "temp_input.txt")
+
+
+@app.route("/", methods=["GET"])
+def health():
+    """Health check route."""
+    return jsonify({"status": "OK", "api_key_loaded": bool(API_KEY)})
+
 
 def generate_text(tamil_input, data_source="google_sheet"):
     """Generates Arwi text from Tamil input using the Gemini API."""
@@ -32,33 +42,41 @@ def generate_text(tamil_input, data_source="google_sheet"):
     client = genai.Client(api_key=API_KEY)
     model = "gemini-2.0-flash"
 
-    # Data loading - support both CSV and Google Sheets
+    # Load data
     if data_source == "csv":
-        data_path = os.path.join(os.path.dirname(__file__), "data", "tamil_arwi.csv")
+        data_path = "data/tamil_arwi.csv"
         credentials_path = None
     elif data_source == "google_sheet":
         data_path = "1CfwdVRxTf5HBErNRK9MIa6lPyzI_Zb_mBJ_nl4YsKxU"
-        credentials_path = os.path.join(os.path.dirname(__file__), "credentials.json")
+        credentials_path = "credentials.json"
     else:
         return "Error: Invalid data source.", 400
 
-    data = load_data(source=data_source, csv_path=data_path, sheet_id=data_path, credentials_path=credentials_path)
+    data = load_data(
+        source=data_source,
+        csv_path=data_path,
+        sheet_id=data_path,
+        credentials_path=credentials_path,
+    )
 
     if not data:
         return "Error: Failed to load data.", 500
 
-    # Input handling - simplified for deployment
+    # Read temporary input file if exists
     try:
-        if os.path.exists(TEMP_INPUT_FILE):
-            with open(TEMP_INPUT_FILE, "r", encoding="utf-8") as f:
-                temp_input_content = f.read().strip()
-                if temp_input_content:
-                    tamil_input = temp_input_content
-                    print(f"Using input from {TEMP_INPUT_FILE}")
+        with open(TEMP_INPUT_FILE, "r", encoding="utf-8") as f:
+            temp_input_content = f.read().strip()
+            if temp_input_content:
+                tamil_input = temp_input_content
+                print(f"Using input from {TEMP_INPUT_FILE}")
+            else:
+                print(f"{TEMP_INPUT_FILE} is empty, using request input.")
+    except FileNotFoundError:
+        print(f"{TEMP_INPUT_FILE} not found, using request input.")
     except Exception as e:
-        print(f"Error reading temp input file: {e}")
+        print(f"Error reading {TEMP_INPUT_FILE}: {e}")
 
-    # Prompt construction
+    # Build prompt
     examples = ""
     for row in data:
         tamil = row["tamil"]
@@ -66,49 +84,41 @@ def generate_text(tamil_input, data_source="google_sheet"):
         examples += f"Tamil: {tamil}, Arwi: {arwi}\n"
 
     prompt = f"""You are an expert in transliterating Tamil text to Arwi script.
-    Don't add any sentence before or after the output text.
-    Here are a few examples: {examples}
-    Now, transliterate the following Tamil text to Arwi: Tamil: {tamil_input} Arwi:"""
+Don't add any sentence before or after the output text.
+Here are a few examples:
+{examples}
+Now, transliterate the following Tamil text to Arwi:
+Tamil: {tamil_input} Arwi:"""
 
     contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
     generate_content_config = types.GenerateContentConfig(
-        temperature=1, 
-        top_p=0.95, 
-        top_k=40, 
-        max_output_tokens=8192, 
+        temperature=1,
+        top_p=0.95,
+        top_k=40,
+        max_output_tokens=8192,
         response_mime_type="text/plain"
     )
 
     output_text = ""
     try:
         for chunk in client.models.generate_content_stream(
-            model=model, 
-            contents=contents, 
+            model=model,
+            contents=contents,
             config=generate_content_config
         ):
             output_text += chunk.text
     except Exception as e:
         return f"Error during Gemini API call: {e}", 500
 
-    # Remove newline characters
     output_text = output_text.replace('\n', '')
-
-    # Logging
-    try:
-        log_data(LOG_FILE, tamil_input, data_source, output_text, OUTPUT_FILE)
-    except Exception as e:
-        print(f"Logging error: {e}")
+    log_data(LOG_FILE, tamil_input, data_source, output_text, OUTPUT_FILE)
 
     return output_text, 200
 
+
 @app.route('/transliterate', methods=['POST'])
 def transliterate():
-    """API endpoint to transliterate Tamil to Arwi."""
     data = request.get_json()
-    
-    if not data:
-        return jsonify({"error": "No JSON data provided."}), 400
-    
     tamil_input = data.get('tamil_input')
     data_source = data.get('data_source', 'google_sheet')
 
@@ -116,37 +126,11 @@ def transliterate():
         return jsonify({"error": "Tamil input is required."}), 400
 
     output_text, status_code = generate_text(tamil_input, data_source)
-
     if status_code == 200:
         return jsonify({"output": output_text})
     else:
         return jsonify({"error": output_text}), status_code
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint."""
-    return jsonify({"status": "healthy", "message": "Tamil-Arwi Transliteration Service is running"})
-
-@app.route('/', methods=['GET'])
-def home():
-    """Home endpoint with API information."""
-    return jsonify({
-        "service": "Tamil-Arwi Transliteration API",
-        "version": "1.0.0",
-        "endpoints": {
-            "transliterate": "/transliterate (POST)",
-            "health": "/health (GET)"
-        },
-        "usage": {
-            "method": "POST",
-            "endpoint": "/transliterate",
-            "body": {
-                "tamil_input": "your tamil text here",
-                "data_source": "google_sheet or csv (optional)"
-            }
-        }
-    })
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(debug=True)
