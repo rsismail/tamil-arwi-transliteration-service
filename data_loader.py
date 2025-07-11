@@ -4,97 +4,33 @@ from google.oauth2.service_account import Credentials
 import os
 import json
 
-def load_data(source="google_sheet", csv_path=None, sheet_id=None, credentials_path=None):
-    """
-    Load data from either CSV file or Google Sheets.
-    
-    Args:
-        source: "csv" or "google_sheet"
-        csv_path: Path to CSV file (if source is "csv")
-        sheet_id: Google Sheets ID (if source is "google_sheet")
-        credentials_path: Path to Google credentials JSON file
-    
-    Returns:
-        List of dictionaries with 'tamil' and 'arwi' keys
-    """
-    
-    if source == "csv":
-        try:
-            if not csv_path or not os.path.exists(csv_path):
-                print(f"CSV file not found: {csv_path}")
-                return None
-            
+def load_data(source, csv_path=None, sheet_id=None, credentials_path=None):
+    try:
+        if source == "google_sheet":
+            print(f"🔍 Loading from Google Sheet: {sheet_id}")
+            print(f"🔑 Using credentials: {credentials_path}")
+
+            creds = Credentials.from_service_account_file(
+                credentials_path,
+                scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
+            )
+            gc = gspread.authorize(creds)
+            sheet = gc.open_by_key(sheet_id)
+            worksheet = sheet.sheet1
+            records = worksheet.get_all_records()
+            print(f"✅ Sheet loaded. Total records: {len(records)}")
+            return records
+
+        elif source == "csv":
+            print(f"🔍 Loading from CSV: {csv_path}")
             df = pd.read_csv(csv_path)
-            
-            # Ensure required columns exist
-            if 'tamil' not in df.columns or 'arwi' not in df.columns:
-                print("CSV must contain 'tamil' and 'arwi' columns")
-                return None
-            
-            # Convert to list of dictionaries
-            data = []
-            for _, row in df.iterrows():
-                data.append({
-                    'tamil': str(row['tamil']),
-                    'arwi': str(row['arwi'])
-                })
-            
-            return data
-            
-        except Exception as e:
-            print(f"Error loading CSV data: {e}")
+            return df.to_dict(orient="records")
+
+        else:
+            print("❌ Unknown data source")
             return None
-    
-    elif source == "google_sheet":
-        try:
-            if not sheet_id or not credentials_path:
-                print("Google Sheets requires sheet_id and credentials_path")
-                return None
-            
-            if not os.path.exists(credentials_path):
-                print(f"Credentials file not found: {credentials_path}")
-                return None
-            
-            # Set up Google Sheets API
-            scope = [
-                "https://spreadsheets.google.com/feeds",
-                "https://www.googleapis.com/auth/drive"
-            ]
-            
-            creds = Credentials.from_service_account_file(credentials_path, scopes=scope)
-            client = gspread.authorize(creds)
-            
-            # Open the spreadsheet
-            sheet = client.open_by_key(sheet_id).sheet1
-            
-            # Get all records
-            records = sheet.get_all_records()
-            
-            if not records:
-                print("No data found in Google Sheet")
-                return None
-            
-            # Convert to required format
-            data = []
-            for record in records:
-                # Handle different possible column names
-                tamil_text = record.get('tamil') or record.get('Tamil') or record.get('TAMIL')
-                arwi_text = record.get('arwi') or record.get('Arwi') or record.get('ARWI')
-                
-                if tamil_text and arwi_text:
-                    data.append({
-                        'tamil': str(tamil_text),
-                        'arwi': str(arwi_text)
-                    })
-            
-            return data
-            
-        except Exception as e:
-            print(f"Error loading Google Sheets data: {e}")
-            return None
-    
-    else:
-        print(f"Unsupported data source: {source}")
+    except Exception as e:
+        print(f"❌ Error loading data: {e}")
         return None
 
 # Test function
